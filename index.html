@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="zh">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <style>
+      body,
+      html {
+        margin: 0;
+        padding: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #000;
+        color: #fff;
+        font-family: sans-serif;
+      }
+      #avatarContainer {
+        width: 100%;
+        height: 100%;
+        background: #000;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        position: relative;
+      }
+      #status {
+        position: absolute;
+        top: 20px;
+        left: 20px;
+        z-index: 100;
+        pointer-events: none;
+        background: rgba(0, 0, 0, 0.5);
+        padding: 5px 10px;
+        border-radius: 4px;
+      }
+      /* Mock Avatar Visualization */
+      .mock-avatar {
+        width: 150px;
+        height: 150px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        box-shadow: 0 0 20px rgba(118, 75, 162, 0.5);
+        display: none;
+        justify-content: center;
+        align-items: center;
+        font-size: 50px;
+        transition: transform 0.2s;
+        z-index: 10;
+      }
+      .mock-avatar.speaking {
+        animation: pulse 0.5s infinite alternate;
+      }
+      @keyframes pulse {
+        from {
+          transform: scale(1);
+          box-shadow: 0 0 20px rgba(118, 75, 162, 0.5);
+        }
+        to {
+          transform: scale(1.1);
+          box-shadow: 0 0 40px rgba(118, 75, 162, 0.8);
+        }
+      }
+      /* Bubble style */
+      .bubble {
+        position: absolute;
+        bottom: 20%;
+        left: 50%;
+        transform: translateX(-50%);
+        background: rgba(255, 255, 255, 0.95);
+        color: #333;
+        padding: 12px 20px;
+        border-radius: 15px;
+        max-width: 80%;
+        font-size: 16px;
+        line-height: 1.4;
+        box-shadow: 0 4px 15px rgba(0, 0, 0, 0.3);
+        z-index: 20;
+        opacity: 0;
+        transition: opacity 0.3s;
+      }
+      .bubble.show {
+        opacity: 1;
+      }
+    </style>
+  </head>
+
+  <body>
+    <div id="status">初始化中...</div>
+    <div id="avatarContainer">
+      <!-- SDK will render here -->
+      <div id="mockAvatar" class="mock-avatar">🤖</div>
+    </div>
+
+    <script>
+      // Override console logging to send to React Native and Screen
+      (function() {
+        var oldLog = console.log;
+        var oldWarn = console.warn;
+        var oldError = console.error;
+
+        function sendToRN(level, args) {
+          if (window.ReactNativeWebView) {
+            try {
+              var msg = Array.from(args).map(arg => {
+                if (typeof arg === 'object') {
+                  try { return JSON.stringify(arg); } catch(e) { return String(arg); }
+                }
+                return String(arg);
+              }).join(' ');
+              window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'console', level: level, content: msg }));
+            } catch(e) {}
+          }
+        }
+
+        console.log = function() { oldLog.apply(console, arguments); sendToRN('log', arguments); };
+        console.warn = function() { oldWarn.apply(console, arguments); sendToRN('warn', arguments); };
+        console.error = function() { oldError.apply(console, arguments); sendToRN('error', arguments); };
+      })();
+
+      // --- Mock Class Definition ---
+      // Used when SDK fails to load or initialize
+      class XmovAvatarMock {
+        constructor(config) {
+          this.config = config;
+          console.log('Mock Avatar Constructor called with:', config);
+        }
+
+        async init() {
+          console.log('Mock Avatar Init');
+          return Promise.resolve();
+        }
+
+        speak(text, isStart, isEnd) {
+          console.log(`Mock Speak: ${text} (Start:${isStart}, End:${isEnd})`);
+          const mockEl = document.getElementById('mockAvatar');
+
+          if (mockEl) {
+            mockEl.style.display = 'flex';
+            mockEl.classList.add('speaking');
+
+            // Show text bubble
+            this.showBubble(text);
+
+            // Try Web Speech API for TTS
+            if ('speechSynthesis' in window) {
+              // Cancel any ongoing speech
+              window.speechSynthesis.cancel();
+
+              const utterance = new SpeechSynthesisUtterance(text);
+              utterance.lang = 'zh-CN'; // Set language to Chinese
+              utterance.rate = 1.0;
+              utterance.pitch = 1.0;
+
+              utterance.onend = () => {
+                mockEl.classList.remove('speaking');
+                this.hideBubble();
+              };
+
+              utterance.onerror = e => {
+                console.error('TTS Error:', e);
+                // Fallback to timer if TTS fails
+                this.fallbackTimer(text.length);
+              };
+
+              window.speechSynthesis.speak(utterance);
+            } else {
+              // Fallback for browsers without TTS
+              this.fallbackTimer(text.length);
+            }
+          }
+        }
+
+        fallbackTimer(textLen) {
+          const mockEl = document.getElementById('mockAvatar');
+          const duration = Math.max(2000, textLen * 200);
+
+          if (this.speakTimer) clearTimeout(this.speakTimer);
+
+          this.speakTimer = setTimeout(() => {
+            if (mockEl) mockEl.classList.remove('speaking');
+            this.hideBubble();
+          }, duration);
+        }
+
+        showBubble(text) {
+          let bubble = document.getElementById('mockBubble');
+          if (!bubble) {
+            bubble = document.createElement('div');
+            bubble.id = 'mockBubble';
+            bubble.className = 'bubble';
+            document.getElementById('avatarContainer').appendChild(bubble);
+          }
+          bubble.innerText = text;
+          // Trigger reflow
+          void bubble.offsetWidth;
+          bubble.classList.add('show');
+        }
+
+        hideBubble() {
+          const bubble = document.getElementById('mockBubble');
+          if (bubble) {
+            bubble.classList.remove('show');
+          }
+        }
+
+        destroy() {
+          console.log('Mock Destroy');
+        }
+      }
+
+      // --- Global State ---
+      let avatarInstance = null;
+      let isMockMode = false;
+
+      // --- Error Handler ---
+      function onSdkLoadError() {
+        console.warn('Virtual Human SDK failed to load. Switching to Simulation Mode.');
+        updateStatus('⚠️ 网络受限: 模拟模式', '#ffcc00');
+        isMockMode = true;
+        window.XmovAvatar = XmovAvatarMock;
+        // Initialize mock immediately if SDK script fails
+        initAvatar();
+      }
+
+      function updateStatus(text, color = '#fff') {
+        const el = document.getElementById('status');
+        if (el) {
+          el.innerText = text;
+          el.style.color = color;
+        }
+      }
+
+      // --- Initialization Logic ---
+      async function initAvatar(config = {}) {
+        try {
+          if (typeof XmovAvatar === 'undefined') {
+            console.error('XmovAvatar class is missing.');
+            // Fallback to mock if not already mock
+            if (!isMockMode) {
+              onSdkLoadError();
+              return;
+            }
+          }
+
+          console.log('Initializing Avatar with config:', config);
+
+          // Default configuration (Xiao Mei)
+          const defaultConfig = {
+            appId: 'aec74b518ab14e4ca6cf1bf34b1cc2b5',
+            appSecret: '6022e1a7d0ad49c0936119ed6059989e',
+            gatewayServer: 'https://nebula-agent.xingyun3d.com/user/v1/ttsa/session',
+          };
+
+          // Merge provided config with defaults
+          const finalConfig = { ...defaultConfig, ...config };
+
+          // Create Instance
+          // Spread finalConfig to ensure all parameters (including viewMode, cameraMode) are passed
+          avatarInstance = new XmovAvatar({
+            ...finalConfig,
+            containerId: '#avatarContainer',
+            
+            // Required callback to prevent "this.options.onMessage is not a function" error
+            onMessage(data) {
+              console.log('SDK Message:', data);
+            },
+
+            // Event Handlers
+            onWidgetEvent(data) {
+              console.log('Widget事件:', data);
+            },
+            onNetworkInfo(info) {
+              // console.log('Network:', info);
+            },
+            onStateChange(state) {
+              console.log('State:', state);
+              if (state === 'ready') {
+                updateStatus('🟢 虚拟人就绪', '#00ff00');
+                notifyRN('avatar_ready');
+                // Hide status after 2 seconds
+                setTimeout(() => {
+                  const el = document.getElementById('status');
+                  if (el) el.style.display = 'none';
+                }, 2000);
+              }
+            },
+            onStatusChange(status) {
+              console.log('Status:', status);
+            },
+            enableLogger: true,
+          });
+
+          // --- Video Watchdog: Ensure video stream is visible and playing ---
+          setInterval(() => {
+            const videos = document.getElementsByTagName('video');
+            for (let i = 0; i < videos.length; i++) {
+              const v = videos[i];
+              // Force visibility
+              if (v.style.display === 'none') v.style.display = 'block';
+              if (v.style.visibility === 'hidden') v.style.visibility = 'visible';
+              if (v.style.opacity === '0') v.style.opacity = '1';
+              
+              // Ensure z-index is high enough
+              v.style.zIndex = '50';
+              
+              // Ensure playback
+              if (v.paused && v.readyState > 2) {
+                console.log('Watchdog: Forcing video playback');
+                v.play().catch(e => console.error('Play error:', e));
+              }
+            }
+          }, 1000);
+
+          // Connect
+          await avatarInstance.init({
+            onDownloadProgress: p => {
+              console.log(`Download progress: ${p}%`);
+              updateStatus(`加载资源: ${p}%`);
+            },
+          });
+
+          // updateStatus('🟢 初始化完成', '#00ff00');
+          // Hide status after success
+          const statusEl = document.getElementById('status');
+          if (statusEl) statusEl.style.display = 'none';
+
+          // --- Attempt to adjust view to Full Body ---
+          try {
+             console.log('Avatar instance keys:', Object.keys(avatarInstance));
+             
+             // 1. Try SDK methods if available (Heuristic)
+             if (typeof avatarInstance.setCameraMode === 'function') {
+                 avatarInstance.setCameraMode('full');
+                 console.log('Called setCameraMode("full")');
+             }
+             if (typeof avatarInstance.setView === 'function') {
+                 avatarInstance.setView('fullbody');
+                 console.log('Called setView("fullbody")');
+             }
+             
+             // 2. Try accessing underlying Three.js camera (common in WebGL SDKs)
+             // Check for .camera or .scene.camera
+             let camera = avatarInstance.camera || (avatarInstance.scene && avatarInstance.scene.camera);
+             if (camera && camera.position) {
+                 console.log('Found internal camera, adjusting for full body...');
+                 console.log('Original Camera Pos:', JSON.stringify(camera.position));
+                 
+                 // Move camera back (increase Z) to zoom out
+                 // Assuming Z is depth. If it's 0, we might need to check other axes.
+                 if (camera.position.z !== 0) {
+                     camera.position.z *= 1.8; // Zoom out by 80%
+                 } else {
+                     camera.position.z = 2.0; // Default fallback
+                 }
+
+                 // Move camera down (decrease Y) to see lower body
+                 camera.position.y -= 0.6; 
+                 
+                 if (typeof camera.updateProjectionMatrix === 'function') {
+                    camera.updateProjectionMatrix();
+                 }
+                 console.log('New Camera Pos:', JSON.stringify(camera.position));
+             } else {
+                 console.log('No internal camera found accessible.');
+             }
+          } catch(e) {
+             console.warn('Failed to adjust avatar view:', e);
+          }
+
+          notifyRN('avatar_ready');
+        } catch (e) {
+          console.error('Avatar init error:', e);
+          updateStatus(`❌ 初始化失败: ${e.message}`, '#ff4444');
+          notifyRN('avatar_error:' + e.message);
+
+          // If real SDK failed, try falling back to Mock
+          if (!isMockMode && window.XmovAvatar !== XmovAvatarMock) {
+            console.log('Attempting fallback to Mock...');
+            onSdkLoadError();
+          }
+        }
+      }
+
+      function notifyRN(msg) {
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(msg);
+        }
+      }
+
+      // --- External Interface for React Native ---
+      // 1. Configure and Start
+      window.setupAvatar = function (config) {
+        console.log('Received setup config:', config);
+        if (!avatarInstance) {
+          initAvatar(config);
+        } else {
+          console.log('Avatar already initialized, skipping setup.');
+        }
+      };
+
+      // 2. Speak
+      window.speakFromRN = function (text) {
+        if (avatarInstance) {
+          // Call SDK speak method: speak(ssml/text, is_start, is_end)
+          avatarInstance.speak(text, true, true);
+        } else {
+          console.warn('Avatar not ready yet, ignored speak:', text);
+        }
+      };
+
+      // Start init when page loads - WAIT for config from RN
+      window.onload = function () {
+        // Notify RN that we are ready to receive config
+        if (window.ReactNativeWebView) {
+          window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'page_loaded' }));
+        }
+
+        // Wait 10 seconds for RN to send config as a fallback.
+        setTimeout(() => {
+          if (!avatarInstance) {
+            console.log('No config received from RN, initializing with defaults...');
+            initAvatar();
+          }
+        }, 10000);
+      };
+    </script>
+
+    <!-- New SDK URL -->
+    <script
+      src="https://media.xingyun3d.com/xingyun3d/general/litesdk/xmovAvatar@latest.js"
+      onerror="onSdkLoadError()"
+    ></script>
+  </body>
+</html>
