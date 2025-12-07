@@ -273,6 +273,10 @@
             onWidgetEvent(data) {
               console.log('Widget事件:', data);
             },
+            onVoiceStateChange(status) {
+              console.log('SDK Voice Status:', status);
+              notifyRN('voice_state:' + status);
+            },
             onNetworkInfo(info) {
               // console.log('Network:', info);
             },
@@ -281,6 +285,17 @@
               if (state === 'ready') {
                 updateStatus('🟢 虚拟人就绪', '#00ff00');
                 notifyRN('avatar_ready');
+                
+                // Ensure max volume
+                if (avatarInstance && typeof avatarInstance.setVolume === 'function') {
+                    avatarInstance.setVolume(1.0);
+                }
+                
+                // Enable debug info for troubleshooting
+                // if (avatarInstance && typeof avatarInstance.showDebugInfo === 'function') {
+                //     avatarInstance.showDebugInfo();
+                // }
+
                 // Hide status after 2 seconds
                 setTimeout(() => {
                   const el = document.getElementById('status');
@@ -406,7 +421,17 @@
       window.speakFromRN = function (text) {
         if (avatarInstance) {
           // Call SDK speak method: speak(ssml/text, is_start, is_end)
-          avatarInstance.speak(text, true, true);
+          
+          // Reset state to interactive_idle to allow continuous speaking
+          if (typeof avatarInstance.interactiveidle === 'function') {
+             avatarInstance.interactiveidle();
+          } else if (typeof avatarInstance.idle === 'function') {
+             avatarInstance.idle();
+          }
+
+          setTimeout(() => {
+              avatarInstance.speak(text, true, true);
+          }, 50);
         } else {
           console.warn('Avatar not ready yet, ignored speak:', text);
         }
